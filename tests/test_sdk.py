@@ -55,12 +55,12 @@ def test_invalid_runtime_and_capability_values_use_stable_errors():
         return Response(b"gateway failed")
 
     client = Client(
-        "http://metis.internal",
+        "http://platform.example.invalid",
         "caller-a7x2m",
         "token",
         opener=open_request,
         environment={
-            "METIS_S3_ENDPOINT": "http://silo.internal",
+            "METIS_S3_ENDPOINT": "http://storage.example.invalid",
             "METIS_S3_ACCESS_KEY": "key",
             "METIS_S3_SECRET_KEY": "secret",
             "METIS_S3_BUCKET": "bucket",
