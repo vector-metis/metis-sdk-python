@@ -28,6 +28,10 @@ def test_shared_contract_cache_refresh_and_config():
 
     client = Client(environment=FIXTURE["environment"], opener=open_request)
     assert client.list_dependencies()[0]["alias"] == "ui"
+    assert client.list_dependencies()[0]["requested_version"] == "^1.2.0"
+    assert client.list_dependencies()[0]["resolved_version"] == "1.4.2"
+    assert client.list_dependencies()[0]["package_sha256"] == "sha256:web"
+    assert client.list_dependencies()[0]["direct"] is True
     client.list_dependencies()
     assert len(calls) == 1
     client.list_dependencies(refresh=True)

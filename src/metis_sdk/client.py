@@ -86,12 +86,13 @@ class Client:
     def list_dependencies(self, refresh: bool = False) -> list[dict[str, Any]]:
         """返回 manifest 声明顺序中的全部直接依赖。"""
 
-        return self._get(self._path("dependencies"), refresh).get("dependencies", [])
+        values = self._get(self._path("dependencies"), refresh).get("dependencies", [])
+        return [_dependency_fields(value) for value in values]
 
     def dependency(self, selector: str, refresh: bool = False) -> dict[str, Any]:
         """通过 alias 或应用 ID 返回一个直接依赖。"""
 
-        return self._get(self._path("dependencies", selector), refresh)
+        return _dependency_fields(self._get(self._path("dependencies", selector), refresh))
 
     def web_url(self, selector: str, path: str = "") -> str:
         """返回 Web 依赖的绝对同源入口地址。"""
@@ -103,9 +104,9 @@ class Client:
         if "\\" in decoded_path or any(part in (".", "..") for part in decoded_path.split("/")):
             raise MetisError("INVALID_CONFIG", "dependency path must stay within the application root")
         dependency = self.dependency(selector)
-        if not dependency.get("available") or not dependency.get("webBasePath"):
+        if not dependency.get("available") or not dependency.get("web_base_path"):
             raise MetisError("DEPENDENCY_UNAVAILABLE", "web dependency is unavailable", 503)
-        base = dependency["webBasePath"].rstrip("/") + "/" + parsed.path.lstrip("/")
+        base = dependency["web_base_path"].rstrip("/") + "/" + parsed.path.lstrip("/")
         return urllib.parse.urljoin(self.platform_endpoint + "/", base.lstrip("/")) + (("?" + parsed.query) if parsed.query else "")
 
     def new_web_request(self, selector: str, method: str, path: str = "", data: bytes | None = None) -> urllib.request.Request:
@@ -116,7 +117,7 @@ class Client:
     def service_endpoint(self, selector: str, endpoint_name: str, refresh: bool = False) -> dict[str, Any]:
         """返回 Service 依赖的具名 Master 代理地址。"""
 
-        return self._get(self._path("dependencies", selector, "endpoints", endpoint_name), refresh)
+        return _endpoint_fields(self._get(self._path("dependencies", selector, "endpoints", endpoint_name), refresh))
 
     def model(self, slot: str) -> dict[str, Any]:
         """解析模型 slot 配置，不创建厂商客户端。"""
@@ -220,3 +221,24 @@ def from_env() -> Client:
     """从进程环境创建客户端。"""
 
     return Client()
+
+
+def _dependency_fields(value: Mapping[str, Any]) -> dict[str, Any]:
+    """把 Runtime JSON 的 camelCase 字段转换成 Python SDK 的 snake_case。"""
+
+    names = {
+        "appId": "app_id",
+        "requestedVersion": "requested_version",
+        "resolvedVersion": "resolved_version",
+        "packageSha256": "package_sha256",
+        "webBasePath": "web_base_path",
+        "resolutionError": "resolution_error",
+    }
+    return {names.get(key, key): item for key, item in value.items()}
+
+
+def _endpoint_fields(value: Mapping[str, Any]) -> dict[str, Any]:
+    """把 Runtime endpoint JSON 转换成 Python SDK 的 snake_case。"""
+
+    names = {"appId": "app_id", "endpointName": "endpoint_name"}
+    return {names.get(key, key): item for key, item in value.items()}

@@ -7,3 +7,6 @@
 ## 0.1.0
 
 - 首次公开发布。
+## 0.1.2
+
+- Normalize Runtime dependency and endpoint fields to Python snake_case and expose version lock metadata.

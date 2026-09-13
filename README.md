@@ -23,6 +23,10 @@ print(embedding["model"], rerank["model"])
 
 运行环境必须提供 `METIS_PLATFORM_ENDPOINT`、`METIS_APP_ID` 和 `METIS_APP_TOKEN`。本地测试可以向 `Client` 显式传入配置。SDK 不创建厂商模型/存储客户端，也不隐藏重试。
 
+依赖和 endpoint 返回字段会转换为 Python 风格：依赖使用 `app_id`、`requested_version`、
+`resolved_version`、`package_sha256`、`direct`、`available`、`resolution_error`、`app_type` 和
+`web_base_path`；应用应在使用可选依赖前检查 `available`。
+
 ## 开发
 
 ```bash
