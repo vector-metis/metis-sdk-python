@@ -14,7 +14,12 @@ from metis_sdk import from_env
 client = from_env()
 for dependency in client.list_dependencies():
     print(dependency["app_id"])
+embedding = client.model("embedding.0")
+rerank = client.model("rerank.0")
+print(embedding["model"], rerank["model"])
 ```
+
+`model()` 支持 `llm.N`、`embedding.N` 和 `rerank.N` 三类 slot，并返回对应的网关地址、模型别名、API key 及类型专属参数。SDK 不创建厂商客户端。
 
 运行环境必须提供 `METIS_PLATFORM_ENDPOINT`、`METIS_APP_ID` 和 `METIS_APP_TOKEN`。本地测试可以向 `Client` 显式传入配置。SDK 不创建厂商模型/存储客户端，也不隐藏重试。
 

@@ -34,6 +34,10 @@ def test_shared_contract_cache_refresh_and_config():
     assert len(calls) == 2
     assert client.service_endpoint("data", "database")["port"] == 31001
     assert client.model("llm.0")["model"] == "example-chat"
+    assert client.model("embedding.0")["model"] == "example-embedding"
+    assert client.model("embedding.0")["values"]["DIMENSIONS"] == "1024"
+    assert client.model("rerank.0")["model"] == "example-rerank"
+    assert client.model("rerank.0")["values"]["MAX_DOCUMENTS"] == "64"
     assert client.object_storage()["shared_buckets"] == ["shared-assets"]
     assert context_from_headers(FIXTURE["trustedHeaders"]).tenant_id == "42"
 
