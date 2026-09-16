@@ -37,11 +37,33 @@ def test_shared_contract_cache_refresh_and_config():
     client.list_dependencies(refresh=True)
     assert len(calls) == 2
     assert client.service_endpoint("data", "database")["port"] == 31001
-    assert client.model("llm.0")["model"] == "example-chat"
-    assert client.model("embedding.0")["model"] == "example-embedding"
-    assert client.model("embedding.0")["values"]["DIMENSIONS"] == "1024"
-    assert client.model("rerank.0")["model"] == "example-rerank"
-    assert client.model("rerank.0")["values"]["MAX_DOCUMENTS"] == "64"
+    llm = client.model("llm.0")
+    assert llm.model == "example-chat"
+    assert llm.supports_vision is True
+    assert llm.supports_thinking is False
+    assert llm.supports_tools is True
+    assert llm.context_window == 32768
+    assert llm.max_output_tokens == 8192
+
+    assert client.try_model("llm.0") is not None
+    assert client.try_model("llm.0").model == "example-chat"
+    assert client.try_model("llm.1") is None
+    assert client.try_model("invalid") is None
+
+    llms = client.models("llm")
+    assert len(llms) == 1
+    assert llms[0].model == "example-chat"
+    with pytest.raises(MetisError) as err:
+        client.models("invalid")
+    assert err.value.reason == "INVALID_CONFIG"
+
+    emb = client.model("embedding.0")
+    assert emb.model == "example-embedding"
+    assert emb.dimensions == 1024
+    assert emb.normalized is True
+
+    rerank = client.model("rerank.0")
+    assert rerank.model == "example-rerank"
     assert client.object_storage()["shared_buckets"] == ["shared-assets"]
     assert context_from_headers(FIXTURE["trustedHeaders"]).tenant_id == "42"
 

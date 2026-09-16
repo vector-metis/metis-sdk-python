@@ -34,6 +34,23 @@ class RequestContext:
     actor_type: str = ""
 
 
+@dataclass(frozen=True)
+class ModelConfig:
+    """平台为一个模型 slot 注入的稳定网关配置。"""
+
+    endpoint: str
+    model: str
+    api_key: str
+    supports_vision: bool = False
+    supports_thinking: bool = False
+    supports_tools: bool = False
+    context_window: int = 0
+    max_input_tokens: int = 0
+    max_output_tokens: int = 0
+    dimensions: int = 0
+    normalized: bool = False
+
+
 def context_from_headers(headers: Mapping[str, str]) -> RequestContext:
     """只从大小写不敏感的 HTTP headers 读取可信上下文。"""
 
@@ -119,17 +136,67 @@ class Client:
 
         return _endpoint_fields(self._get(self._path("dependencies", selector, "endpoints", endpoint_name), refresh))
 
-    def model(self, slot: str) -> dict[str, Any]:
-        """解析模型 slot 配置，不创建厂商客户端。"""
+    def _parse_model_slot(self, slot: str) -> ModelConfig | None:
+        parts = slot.split(".")
+        if len(parts) != 2 or parts[0] not in ("llm", "embedding", "rerank") or re.fullmatch(r"[0-9]+", parts[1]) is None:
+            return None
+        prefix = f"METIS_{parts[0].upper()}_{parts[1]}_"
+        endpoint = self.environment.get(prefix + "ENDPOINT", "")
+        model_name = self.environment.get(prefix + "MODEL", "")
+        api_key = self.environment.get(prefix + "API_KEY", "")
+        if not endpoint or not model_name or not api_key:
+            return None
+
+        def to_int(suffix: str) -> int:
+            try:
+                return int(self.environment.get(prefix + suffix, "0"))
+            except ValueError:
+                return 0
+
+        def to_bool(suffix: str) -> bool:
+            return self.environment.get(prefix + suffix, "").strip().lower() == "true"
+
+        return ModelConfig(
+            endpoint=endpoint,
+            model=model_name,
+            api_key=api_key,
+            supports_vision=to_bool("SUPPORTS_VISION"),
+            supports_thinking=to_bool("SUPPORTS_THINKING"),
+            supports_tools=to_bool("SUPPORTS_TOOLS"),
+            context_window=to_int("CONTEXT_WINDOW"),
+            max_input_tokens=to_int("MAX_INPUT_TOKENS"),
+            max_output_tokens=to_int("MAX_OUTPUT_TOKENS"),
+            dimensions=to_int("DIMENSIONS"),
+            normalized=to_bool("NORMALIZED"),
+        )
+
+    def model(self, slot: str) -> ModelConfig:
+        """解析模型 slot 配置，不创建厂商客户端。未绑定或格式错误时抛出 MetisError。"""
 
         parts = slot.split(".")
         if len(parts) != 2 or parts[0] not in ("llm", "embedding", "rerank") or re.fullmatch(r"[0-9]+", parts[1]) is None:
             raise MetisError("INVALID_CONFIG", f"invalid model slot {slot}")
-        prefix = f"METIS_{parts[0].upper()}_{parts[1]}_"
-        values = {name.removeprefix(prefix): value for name, value in self.environment.items() if name.startswith(prefix)}
-        if not values.get("ENDPOINT") or not values.get("MODEL") or not values.get("API_KEY"):
+        config = self._parse_model_slot(slot)
+        if config is None:
             raise MetisError("MISSING_CONFIG", f"model slot {slot} is incomplete")
-        return {"endpoint": values["ENDPOINT"], "model": values["MODEL"], "api_key": values["API_KEY"], "values": values}
+        return config
+
+    def try_model(self, slot: str) -> ModelConfig | None:
+        """安全尝试读取模型 slot 配置；若未绑定或格式非法则返回 None，不抛出异常。"""
+
+        return self._parse_model_slot(slot)
+
+    def models(self, model_type: str) -> list[ModelConfig]:
+        """批量枚举指定模型类型当前绑定的所有模型配置，按插槽序号升序排列。"""
+
+        if model_type not in ("llm", "embedding", "rerank"):
+            raise MetisError("INVALID_CONFIG", f"invalid model type {model_type}")
+        result: list[ModelConfig] = []
+        for i in range(10):
+            config = self._parse_model_slot(f"{model_type}.{i}")
+            if config is not None:
+                result.append(config)
+        return result
 
     def object_storage(self) -> dict[str, Any]:
         """解析应用 S3 配置，不连接存储或刷新凭据。"""
