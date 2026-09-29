@@ -4,7 +4,17 @@ from pathlib import Path
 
 import pytest
 
-from metis_sdk import Client, MetisError, context_from_headers
+from metis_sdk import (
+    Client,
+    MetisError,
+    ModelAttribution,
+    context_from_headers,
+    platform_identity_from_headers,
+    platform_identity_from_request,
+    with_external_user,
+    with_platform_identity,
+    without_user_attribution,
+)
 
 
 FIXTURE = json.loads((Path(__file__).parents[1] / "testdata" / "runtime.json").read_text())
@@ -106,3 +116,44 @@ def test_invalid_runtime_and_capability_values_use_stable_errors():
     with pytest.raises(MetisError) as storage_error:
         client.object_storage()
     assert storage_error.value.reason == "INVALID_CONFIG"
+
+
+def test_model_requests_always_carry_slot_key_and_one_attribution():
+    model = Client(environment=FIXTURE["environment"]).model("llm.0")
+    request = model.new_request("POST", "/v1/chat/completions", with_platform_identity(42, 84))
+    assert request.get_header("Authorization") == "Bearer model-token"
+    assert request.get_header("X-platform-tenant-id") == "42"
+    assert request.get_header("X-platform-user-id") == "84"
+    assert request.get_header("X-platform-external-user-id") is None
+
+    request = model.new_request("POST", "/v1/embeddings", with_external_user(" customer-1 "))
+    assert request.get_header("Authorization") == "Bearer model-token"
+    assert request.get_header("X-platform-tenant-id") is None
+    assert request.get_header("X-platform-user-id") is None
+    assert request.get_header("X-platform-external-user-id") == "customer-1"
+
+    request = model.new_request("POST", "/v1/rerank", without_user_attribution())
+    assert request.get_header("Authorization") == "Bearer model-token"
+    assert request.get_header("X-platform-external-user-id") is None
+
+
+def test_model_attribution_rejects_invalid_values_and_paths():
+    expected = with_platform_identity(42, 84)
+    headers = {"X-Platform-Tenant-Id": "42", "x-platform-user-id": "84"}
+    assert platform_identity_from_headers(headers) == expected
+    assert platform_identity_from_request(type("Request", (), {"headers": headers})()) == expected
+    for tenant_id, user_id in ((0, 1), (1, -1), (True, 1)):
+        with pytest.raises(MetisError, match="positive integers"):
+            with_platform_identity(tenant_id, user_id)
+    for external_id in ("", " ", "a" * 129, "你" * 43, "bad\nvalue"):
+        with pytest.raises(MetisError, match="1-128 bytes"):
+            with_external_user(external_id)
+    with pytest.raises(MetisError, match="valid platform identity"):
+        platform_identity_from_headers({})
+
+    model = Client(environment=FIXTURE["environment"]).model("llm.0")
+    for path in ("", "v1/chat/completions", "//elsewhere.test/v1"):
+        with pytest.raises(MetisError, match="absolute request path"):
+            model.new_request("POST", path, without_user_attribution())
+    with pytest.raises(MetisError, match="attribution is required"):
+        model.new_request("POST", "/v1/chat/completions", ModelAttribution("invalid"))

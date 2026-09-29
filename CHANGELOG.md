@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.0
+
+- 增加平台用户、外部用户和其他用户三类模型用量归因。
+- 增加始终携带 slot API key 和显式归因的 `ModelConfig.new_request()`。
+
 ## 0.2.0
 
 - 强类型重构 `ModelConfig`，彻底移除弱类型 `values` 字典。

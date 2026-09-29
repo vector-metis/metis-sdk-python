@@ -10,6 +10,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import unicodedata
 from dataclasses import dataclass
 from typing import Any, Mapping
 
@@ -35,6 +36,16 @@ class RequestContext:
 
 
 @dataclass(frozen=True)
+class ModelAttribution:
+    """一次模型调用的最终用户归因；请通过模块辅助函数创建。"""
+
+    kind: str
+    tenant_id: int = 0
+    user_id: int = 0
+    external_user_id: str = ""
+
+
+@dataclass(frozen=True)
 class ModelConfig:
     """平台为一个模型 slot 注入的稳定网关配置。"""
 
@@ -49,6 +60,26 @@ class ModelConfig:
     max_output_tokens: int = 0
     dimensions: int = 0
     normalized: bool = False
+
+    def new_request(
+        self,
+        method: str,
+        request_path: str,
+        attribution: ModelAttribution,
+        data: bytes | None = None,
+    ) -> urllib.request.Request:
+        """创建携带 slot API key 和显式最终用户归因的网关请求。"""
+
+        endpoint = self.endpoint.strip().rstrip("/")
+        request_path = request_path.strip()
+        if not endpoint or not self.api_key or not request_path.startswith("/") or request_path.startswith("//"):
+            raise MetisError("INVALID_CONFIG", "model endpoint, API key and absolute request path are required")
+        headers = {"Authorization": "Bearer " + self.api_key}
+        _apply_attribution(headers, attribution)
+        try:
+            return urllib.request.Request(endpoint + request_path, data=data, method=method, headers=headers)
+        except ValueError as error:
+            raise MetisError("INVALID_CONFIG", f"model request is invalid: {error}") from error
 
 
 def context_from_headers(headers: Mapping[str, str]) -> RequestContext:
@@ -68,6 +99,67 @@ def context_from_request(request: Any) -> RequestContext:
     """从具有 headers 属性的框架请求读取可信上下文。"""
 
     return context_from_headers(request.headers)
+
+
+def with_platform_identity(tenant_id: int, user_id: int) -> ModelAttribution:
+    """把模型用量归属于平台租户中的平台用户。"""
+
+    if type(tenant_id) is not int or type(user_id) is not int or tenant_id <= 0 or user_id <= 0:
+        raise MetisError("INVALID_CONFIG", "platform tenant and user ids must be positive integers")
+    return ModelAttribution("platform", tenant_id=tenant_id, user_id=user_id)
+
+
+def platform_identity_from_headers(headers: Mapping[str, str]) -> ModelAttribution:
+    """从平台保护入口覆盖写入的可信头构造归因。"""
+
+    context = context_from_headers(headers)
+    try:
+        tenant_id = int(context.tenant_id.strip())
+        user_id = int(context.user_id.strip())
+    except (AttributeError, ValueError) as error:
+        raise MetisError("INVALID_CONFIG", "headers do not contain a valid platform identity") from error
+    return with_platform_identity(tenant_id, user_id)
+
+
+def platform_identity_from_request(request: Any) -> ModelAttribution:
+    """从具有 headers 属性的平台请求构造归因。"""
+
+    if request is None or not hasattr(request, "headers"):
+        raise MetisError("INVALID_CONFIG", "platform request is required")
+    return platform_identity_from_headers(request.headers)
+
+
+def with_external_user(external_user_id: str) -> ModelAttribution:
+    """把模型用量归属于应用已自行认证的外部用户。"""
+
+    external_user_id = external_user_id.strip()
+    if (
+        not external_user_id
+        or len(external_user_id.encode("utf-8")) > 128
+        or any(unicodedata.category(character).startswith("C") for character in external_user_id)
+    ):
+        raise MetisError("INVALID_CONFIG", "external user id must be 1-128 bytes without control characters")
+    return ModelAttribution("external", external_user_id=external_user_id)
+
+
+def without_user_attribution() -> ModelAttribution:
+    """明确把无法对应到个人的后台调用归入其他用户。"""
+
+    return ModelAttribution("other")
+
+
+def _apply_attribution(headers: dict[str, str], attribution: ModelAttribution) -> None:
+    for name in ("X-Platform-Tenant-Id", "X-Platform-User-Id", "X-Platform-External-User-Id"):
+        headers.pop(name, None)
+    if attribution.kind == "platform":
+        valid = with_platform_identity(attribution.tenant_id, attribution.user_id)
+        headers["X-Platform-Tenant-Id"] = str(valid.tenant_id)
+        headers["X-Platform-User-Id"] = str(valid.user_id)
+    elif attribution.kind == "external":
+        valid = with_external_user(attribution.external_user_id)
+        headers["X-Platform-External-User-Id"] = valid.external_user_id
+    elif attribution.kind != "other":
+        raise MetisError("INVALID_CONFIG", "model attribution is required")
 
 
 class Client:
