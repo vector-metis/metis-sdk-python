@@ -5,6 +5,7 @@ from .client import (
     MetisError,
     ModelAttribution,
     ModelConfig,
+    RuntimeModel,
     context_from_headers,
     context_from_request,
     from_env,
@@ -16,7 +17,7 @@ from .client import (
 )
 
 __all__ = [
-    "Client", "MetisError", "ModelAttribution", "ModelConfig", "context_from_headers",
+    "Client", "MetisError", "ModelAttribution", "ModelConfig", "RuntimeModel", "context_from_headers",
     "context_from_request", "from_env", "platform_identity_from_headers",
     "platform_identity_from_request", "with_external_user", "with_platform_identity",
     "without_user_attribution",

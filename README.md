@@ -21,6 +21,13 @@ print(embedding["model"], rerank["model"])
 
 `model()` 支持 `llm.N`、`embedding.N` 和 `rerank.N` 三类 slot，并返回对应的网关地址、模型别名、API key 及类型专属参数。SDK 不创建厂商客户端。
 
+`list_runtime_models()` 返回当前应用已绑定 slot 的展示名称、图标、能力、上下文限制和繁忙度，不返回 API key 或供应商凭据：
+
+```python
+for model in client.list_runtime_models():
+    print(model.slot, model.display_name, model.busy_level)
+```
+
 模型 slot API key 始终必填，请显式选择最终用户归因：
 
 ```python

@@ -33,7 +33,12 @@ def test_shared_contract_cache_refresh_and_config():
 
     def open_request(request):
         calls.append(request.full_url)
-        payload = FIXTURE["endpoint"] if request.full_url.endswith("/endpoints/database") else FIXTURE["dependencies"]
+        if request.full_url.endswith("/endpoints/database"):
+            payload = FIXTURE["endpoint"]
+        elif request.full_url.endswith("/models"):
+            payload = {"models": [{"slot": "llm.0", "slotType": "llm", "slotIndex": 0, "interface": "openai.chat.completions", "model": "qwen-plus", "displayName": "通义千问 Plus", "traits": ["vision", "tools"], "supportsVision": True, "supportsTools": True, "activity": "active", "busyLevel": "unknown"}]}
+        else:
+            payload = FIXTURE["dependencies"]
         return Response(json.dumps(payload).encode())
 
     client = Client(environment=FIXTURE["environment"], opener=open_request)
@@ -47,6 +52,10 @@ def test_shared_contract_cache_refresh_and_config():
     client.list_dependencies(refresh=True)
     assert len(calls) == 2
     assert client.service_endpoint("data", "database")["port"] == 31001
+    runtime_models = client.list_runtime_models()
+    assert runtime_models[0].slot == "llm.0"
+    assert runtime_models[0].supports_vision is True
+    assert runtime_models[0].busy_level == "unknown"
     llm = client.model("llm.0")
     assert llm.model == "example-chat"
     assert llm.supports_vision is True

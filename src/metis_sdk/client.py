@@ -82,6 +82,32 @@ class ModelConfig:
             raise MetisError("INVALID_CONFIG", f"model request is invalid: {error}") from error
 
 
+@dataclass(frozen=True)
+class RuntimeModel:
+    """Runtime API 返回的模型展示和能力投影，不包含任何凭据。"""
+
+    slot: str
+    slot_type: str
+    slot_index: int
+    interface: str
+    endpoint: str
+    model: str
+    display_name: str
+    icon_url: str
+    description: str
+    traits: tuple[str, ...]
+    supports_vision: bool
+    supports_thinking: bool
+    supports_tools: bool
+    context_window: int
+    max_input_tokens: int
+    max_output_tokens: int
+    dimensions: int
+    activity: str
+    busy_level: str
+    updated_at: str
+
+
 def context_from_headers(headers: Mapping[str, str]) -> RequestContext:
     """只从大小写不敏感的 HTTP headers 读取可信上下文。"""
 
@@ -227,6 +253,12 @@ class Client:
         """返回 Service 依赖的具名 Master 代理地址。"""
 
         return _endpoint_fields(self._get(self._path("dependencies", selector, "endpoints", endpoint_name), refresh))
+
+    def list_runtime_models(self, refresh: bool = False) -> list[RuntimeModel]:
+        """返回当前应用已绑定 slot 的非敏感能力数据；未知状态保持 ``unknown``。"""
+
+        values = self._get(self._path("models"), refresh).get("models", [])
+        return [_runtime_model(value) for value in values]
 
     def _parse_model_slot(self, slot: str) -> ModelConfig | None:
         parts = slot.split(".")
@@ -401,3 +433,23 @@ def _endpoint_fields(value: Mapping[str, Any]) -> dict[str, Any]:
 
     names = {"appId": "app_id", "endpointName": "endpoint_name"}
     return {names.get(key, key): item for key, item in value.items()}
+
+
+def _runtime_model(value: Mapping[str, Any]) -> RuntimeModel:
+    """把 Runtime API 的 camelCase 模型字段转换为稳定的 Python 类型。"""
+
+    traits = value.get("traits", [])
+    if not isinstance(traits, list):
+        traits = []
+    return RuntimeModel(
+        slot=str(value.get("slot", "")), slot_type=str(value.get("slotType", "")),
+        slot_index=int(value.get("slotIndex", 0) or 0), interface=str(value.get("interface", "")),
+        endpoint=str(value.get("endpoint", "")), model=str(value.get("model", "")),
+        display_name=str(value.get("displayName", "")), icon_url=str(value.get("iconUrl", "")),
+        description=str(value.get("description", "")), traits=tuple(str(item) for item in traits),
+        supports_vision=bool(value.get("supportsVision", False)), supports_thinking=bool(value.get("supportsThinking", False)),
+        supports_tools=bool(value.get("supportsTools", False)), context_window=int(value.get("contextWindow", 0) or 0),
+        max_input_tokens=int(value.get("maxInputTokens", 0) or 0), max_output_tokens=int(value.get("maxOutputTokens", 0) or 0),
+        dimensions=int(value.get("dimensions", 0) or 0), activity=str(value.get("activity", "unknown")),
+        busy_level=str(value.get("busyLevel", "unknown")), updated_at=str(value.get("updatedAt", "")),
+    )
