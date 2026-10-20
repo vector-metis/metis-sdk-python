@@ -106,6 +106,33 @@ class RuntimeModel:
     activity: str
     busy_level: str
     updated_at: str
+    declared: bool = False
+    bound: bool = False
+    status: str = ""
+    icon_file_id: int = 0
+    supports_audio: bool = False
+    supports_image_input: bool = False
+    supports_multimodal: bool = False
+
+
+@dataclass(frozen=True)
+class RuntimeSetting:
+    type: str = ""
+    required: bool = False
+    value: str = ""
+
+
+@dataclass(frozen=True)
+class RuntimeConfig:
+    schema_version: int
+    revision: int
+    updated_at: str
+    application: Mapping[str, Any]
+    settings: Mapping[str, RuntimeSetting]
+    models: Mapping[str, RuntimeModel]
+    storage: Mapping[str, Any]
+    tenant: Mapping[str, Any]
+    features: Mapping[str, Any]
 
 
 def context_from_headers(headers: Mapping[str, str]) -> RequestContext:
@@ -196,6 +223,7 @@ class Client:
         platform_endpoint: str | None = None,
         app_id: str | None = None,
         app_token: str | None = None,
+        service_name: str | None = None,
         *,
         environment: Mapping[str, str] | None = None,
         cache_ttl: float = 30.0,
@@ -205,6 +233,7 @@ class Client:
         self.platform_endpoint = (platform_endpoint or env.get("METIS_PLATFORM_ENDPOINT", "")).rstrip("/")
         self.app_id = app_id or env.get("METIS_APP_ID", "")
         self.app_token = app_token or env.get("METIS_APP_TOKEN", "")
+        self.service_name = service_name or env.get("METIS_SERVICE_NAME", "")
         parsed = urllib.parse.urlparse(self.platform_endpoint)
         if not self.platform_endpoint or not self.app_id or not self.app_token:
             raise MetisError("MISSING_CONFIG", "METIS_PLATFORM_ENDPOINT, METIS_APP_ID and METIS_APP_TOKEN are required")
@@ -254,11 +283,16 @@ class Client:
 
         return _endpoint_fields(self._get(self._path("dependencies", selector, "endpoints", endpoint_name), refresh))
 
-    def list_runtime_models(self, refresh: bool = False) -> list[RuntimeModel]:
-        """返回当前应用已绑定 slot 的非敏感能力数据；未知状态保持 ``unknown``。"""
+    def runtime_config(self, refresh: bool = False) -> RuntimeConfig:
+        """读取当前 service 的统一运行配置快照。"""
 
-        values = self._get(self._path("models"), refresh).get("models", [])
-        return [_runtime_model(value) for value in values]
+        if not self.service_name.strip():
+            raise MetisError("MISSING_CONFIG", "METIS_SERVICE_NAME is required")
+        value = self._get("/api/runtime/v1/config", refresh, {"X-Metis-Service": self.service_name})
+        config = value.get("config", {})
+        settings = {key: RuntimeSetting(type=str(item.get("type", "")), required=bool(item.get("required", False)), value=str(item.get("value", ""))) for key, item in config.get("settings", {}).items()}
+        models = {key: _runtime_model(item) for key, item in config.get("models", {}).items()}
+        return RuntimeConfig(schema_version=int(value.get("schemaVersion", 0) or 0), revision=int(value.get("revision", 0) or 0), updated_at=str(value.get("updatedAt", "")), application=value.get("application", {}), settings=settings, models=models, storage=config.get("storage", {}), tenant=config.get("tenant", {}), features=config.get("features", {}))
 
     def _parse_model_slot(self, slot: str) -> ModelConfig | None:
         parts = slot.split(".")
@@ -383,13 +417,15 @@ class Client:
         encoded = "/".join(urllib.parse.quote(part.strip(), safe="") for part in parts)
         return f"/api/runtime/v1/apps/{urllib.parse.quote(self.app_id, safe='')}/{encoded}"
 
-    def _get(self, path: str, refresh: bool) -> Any:
+    def _get(self, path: str, refresh: bool, extra_headers: Mapping[str, str] | None = None) -> Any:
         now = time.monotonic()
         with self._lock:
             cached = self._cache.get(path)
         if not refresh and cached and cached[0] > now:
             return cached[1]
-        request = urllib.request.Request(self.platform_endpoint + path, headers={"Authorization": "Bearer " + self.app_token})
+        headers = {"Authorization": "Bearer " + self.app_token}
+        headers.update(extra_headers or {})
+        request = urllib.request.Request(self.platform_endpoint + path, headers=headers)
         try:
             with self.opener(request) as response:
                 try:
@@ -452,4 +488,7 @@ def _runtime_model(value: Mapping[str, Any]) -> RuntimeModel:
         max_input_tokens=int(value.get("maxInputTokens", 0) or 0), max_output_tokens=int(value.get("maxOutputTokens", 0) or 0),
         dimensions=int(value.get("dimensions", 0) or 0), activity=str(value.get("activity", "unknown")),
         busy_level=str(value.get("busyLevel", "unknown")), updated_at=str(value.get("updatedAt", "")),
+        declared=bool(value.get("declared", False)), bound=bool(value.get("bound", False)), status=str(value.get("status", "")),
+        icon_file_id=int(value.get("iconFileId", 0) or 0), supports_audio=bool(value.get("supportsAudio", False)),
+        supports_image_input=bool(value.get("supportsImageInput", False)), supports_multimodal=bool(value.get("supportsMultimodal", False)),
     )

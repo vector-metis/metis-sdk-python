@@ -35,13 +35,14 @@ def test_shared_contract_cache_refresh_and_config():
         calls.append(request.full_url)
         if request.full_url.endswith("/endpoints/database"):
             payload = FIXTURE["endpoint"]
-        elif request.full_url.endswith("/models"):
-            payload = {"models": [{"slot": "llm.0", "slotType": "llm", "slotIndex": 0, "interface": "openai.chat.completions", "model": "qwen-plus", "displayName": "通义千问 Plus", "traits": ["vision", "tools"], "supportsVision": True, "supportsTools": True, "activity": "active", "busyLevel": "unknown"}]}
+        elif request.full_url.endswith("/api/runtime/v1/config"):
+            assert request.headers.get("X-metis-service") == "web"
+            payload = {"schemaVersion": 1, "revision": 2, "config": {"settings": {"site-name": {"type": "string", "value": "demo"}}, "models": {"llm.0": {"slot": "llm.0", "model": "qwen-plus", "displayName": "通义千问 Plus", "supportsVision": True, "supportsTools": True, "activity": "active", "busyLevel": "unknown"}}, "storage": {}, "tenant": {}, "features": {}}}
         else:
             payload = FIXTURE["dependencies"]
         return Response(json.dumps(payload).encode())
 
-    client = Client(environment=FIXTURE["environment"], opener=open_request)
+    client = Client(environment={**FIXTURE["environment"], "METIS_SERVICE_NAME": "web"}, opener=open_request)
     assert client.list_dependencies()[0]["alias"] == "ui"
     assert client.list_dependencies()[0]["requested_version"] == "^1.2.0"
     assert client.list_dependencies()[0]["resolved_version"] == "1.4.2"
@@ -52,10 +53,10 @@ def test_shared_contract_cache_refresh_and_config():
     client.list_dependencies(refresh=True)
     assert len(calls) == 2
     assert client.service_endpoint("data", "database")["port"] == 31001
-    runtime_models = client.list_runtime_models()
-    assert runtime_models[0].slot == "llm.0"
-    assert runtime_models[0].supports_vision is True
-    assert runtime_models[0].busy_level == "unknown"
+    runtime_config = client.runtime_config()
+    assert runtime_config.revision == 2
+    assert runtime_config.models["llm.0"].display_name == "通义千问 Plus"
+    assert runtime_config.models["llm.0"].supports_vision is True
     llm = client.model("llm.0")
     assert llm.model == "example-chat"
     assert llm.supports_vision is True
