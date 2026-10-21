@@ -37,7 +37,7 @@ def test_shared_contract_cache_refresh_and_config():
             payload = FIXTURE["endpoint"]
         elif request.full_url.endswith("/api/runtime/v1/config"):
             assert request.headers.get("X-metis-service") == "web"
-            payload = {"schemaVersion": 1, "revision": 2, "config": {"settings": {"site-name": {"type": "string", "value": "demo"}}, "models": {"llm.0": {"slot": "llm.0", "model": "qwen-plus", "displayName": "通义千问 Plus", "supportsVision": True, "supportsTools": True, "activity": "active", "busyLevel": "unknown"}}, "storage": {}, "tenant": {}, "features": {}}}
+            payload = {"schemaVersion": "1", "revision": "2", "config": {"settings": {"site-name": {"type": "string", "value": "demo"}}, "models": {"llm.0": {"slot": "llm.0", "slotIndex": "0", "model": "qwen-plus", "displayName": "通义千问 Plus", "supportsVision": True, "supportsTools": True, "contextWindow": "131072", "iconFileId": "42", "activity": "active", "busyLevel": "unknown"}}, "storage": {}, "tenant": {}, "features": {}}}
         else:
             payload = FIXTURE["dependencies"]
         return Response(json.dumps(payload).encode())
