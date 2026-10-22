@@ -54,9 +54,11 @@ def test_shared_contract_cache_refresh_and_config():
     assert len(calls) == 2
     assert client.service_endpoint("data", "database")["port"] == 31001
     runtime_config = client.runtime_config()
-    assert runtime_config.revision == 2
+    assert runtime_config.revision == "2"
     assert runtime_config.models["llm.0"].display_name == "通义千问 Plus"
     assert runtime_config.models["llm.0"].supports_vision is True
+    assert runtime_config.models["llm.0"].context_window == "131072"
+    assert runtime_config.models["llm.0"].icon_file_id == "42"
     llm = client.model("llm.0")
     assert llm.model == "example-chat"
     assert llm.supports_vision is True
@@ -91,6 +93,19 @@ def test_shared_contract_cache_refresh_and_config():
         with pytest.raises(MetisError) as path_error:
             client.web_url("ui", path)
         assert path_error.value.reason == "INVALID_CONFIG"
+
+
+def test_runtime_64_bit_values_remain_strings():
+    def open_request(request):
+        if request.full_url.endswith("/api/runtime/v1/config"):
+            return Response(json.dumps({"schemaVersion": 1, "revision": "9007199254740993", "config": {"models": {"llm.0": {"contextWindow": "640409671307362374", "iconFileId": "640409671307362375"}}}}).encode())
+        return Response(b"{}")
+
+    client = Client("http://platform.test", "app", "token", environment={"METIS_SERVICE_NAME": "web"}, opener=open_request)
+    config = client.runtime_config()
+    assert config.revision == "9007199254740993"
+    assert config.models["llm.0"].context_window == "640409671307362374"
+    assert config.models["llm.0"].icon_file_id == "640409671307362375"
 
 
 def test_explicit_local_config_and_missing_config():

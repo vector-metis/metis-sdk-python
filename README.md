@@ -29,6 +29,8 @@ for slot, model in config.models.items():
     print(slot, model.display_name, model.busy_level)
 ```
 
+Runtime Config 中原始 protobuf 类型为 `int64` 或 `uint64` 的字段（例如 `revision`、`installation_id`、`context_window` 和 `icon_file_id`）在 protojson 中使用十进制字符串，Python SDK 也保持为 `str`。SDK 不把这些值转换为整数或根据内容猜测类型；需要计算时由应用显式调用 `int(value)`。`int32/uint32` 和有限浮点字段仍按数字处理。
+
 模型 slot API key 始终必填，请显式选择最终用户归因：
 
 ```python

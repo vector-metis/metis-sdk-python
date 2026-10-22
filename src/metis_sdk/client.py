@@ -99,17 +99,20 @@ class RuntimeModel:
     supports_vision: bool
     supports_thinking: bool
     supports_tools: bool
-    context_window: int
-    max_input_tokens: int
-    max_output_tokens: int
-    dimensions: int
+    # These fields are protobuf int64 values. protojson represents them as decimal strings;
+    # the SDK deliberately keeps the strings unchanged instead of guessing numeric types.
+    context_window: str
+    max_input_tokens: str
+    max_output_tokens: str
+    dimensions: str
     activity: str
     busy_level: str
     updated_at: str
     declared: bool = False
     bound: bool = False
     status: str = ""
-    icon_file_id: int = 0
+    # Original protobuf type: int64. Keep IDs as strings in every SDK language.
+    icon_file_id: str = ""
     supports_audio: bool = False
     supports_image_input: bool = False
     supports_multimodal: bool = False
@@ -125,7 +128,8 @@ class RuntimeSetting:
 @dataclass(frozen=True)
 class RuntimeConfig:
     schema_version: int
-    revision: int
+    # Original protobuf type: int64. protojson and this SDK use a decimal string.
+    revision: str
     updated_at: str
     application: Mapping[str, Any]
     settings: Mapping[str, RuntimeSetting]
@@ -292,7 +296,7 @@ class Client:
         config = value.get("config", {})
         settings = {key: RuntimeSetting(type=str(item.get("type", "")), required=bool(item.get("required", False)), value=str(item.get("value", ""))) for key, item in config.get("settings", {}).items()}
         models = {key: _runtime_model(item) for key, item in config.get("models", {}).items()}
-        return RuntimeConfig(schema_version=int(value.get("schemaVersion", 0) or 0), revision=int(value.get("revision", 0) or 0), updated_at=str(value.get("updatedAt", "")), application=value.get("application", {}), settings=settings, models=models, storage=config.get("storage", {}), tenant=config.get("tenant", {}), features=config.get("features", {}))
+        return RuntimeConfig(schema_version=int(value.get("schemaVersion", 0) or 0), revision=_proto_i64_string(value.get("revision", ""), "revision"), updated_at=str(value.get("updatedAt", "")), application=value.get("application", {}), settings=settings, models=models, storage=config.get("storage", {}), tenant=config.get("tenant", {}), features=config.get("features", {}))
 
     def _parse_model_slot(self, slot: str) -> ModelConfig | None:
         parts = slot.split(".")
@@ -484,11 +488,26 @@ def _runtime_model(value: Mapping[str, Any]) -> RuntimeModel:
         display_name=str(value.get("displayName", "")), icon_url=str(value.get("iconUrl", "")),
         description=str(value.get("description", "")), traits=tuple(str(item) for item in traits),
         supports_vision=bool(value.get("supportsVision", False)), supports_thinking=bool(value.get("supportsThinking", False)),
-        supports_tools=bool(value.get("supportsTools", False)), context_window=int(value.get("contextWindow", 0) or 0),
-        max_input_tokens=int(value.get("maxInputTokens", 0) or 0), max_output_tokens=int(value.get("maxOutputTokens", 0) or 0),
-        dimensions=int(value.get("dimensions", 0) or 0), activity=str(value.get("activity", "unknown")),
+        supports_tools=bool(value.get("supportsTools", False)), context_window=_proto_i64_string(value.get("contextWindow", ""), "contextWindow"),
+        max_input_tokens=_proto_i64_string(value.get("maxInputTokens", ""), "maxInputTokens"), max_output_tokens=_proto_i64_string(value.get("maxOutputTokens", ""), "maxOutputTokens"),
+        dimensions=_proto_i64_string(value.get("dimensions", ""), "dimensions"), activity=str(value.get("activity", "unknown")),
         busy_level=str(value.get("busyLevel", "unknown")), updated_at=str(value.get("updatedAt", "")),
         declared=bool(value.get("declared", False)), bound=bool(value.get("bound", False)), status=str(value.get("status", "")),
-        icon_file_id=int(value.get("iconFileId", 0) or 0), supports_audio=bool(value.get("supportsAudio", False)),
+        icon_file_id=_proto_i64_string(value.get("iconFileId", ""), "iconFileId"), supports_audio=bool(value.get("supportsAudio", False)),
         supports_image_input=bool(value.get("supportsImageInput", False)), supports_multimodal=bool(value.get("supportsMultimodal", False)),
     )
+
+
+def _proto_i64_string(value: Any, field: str) -> str:
+    """Validate a protobuf int64/uint64 JSON value without converting it.
+
+    protojson requires 64-bit integers to be decimal strings. Keeping the value as a
+    string also avoids precision loss in JavaScript/Node.js consumers; callers that
+    need arithmetic must opt into an explicit conversion themselves.
+    """
+
+    if value == "":
+        return ""
+    if not isinstance(value, str):
+        raise MetisError("UPSTREAM_FAILURE", f"runtime field {field} must be a protobuf 64-bit integer string", 502)
+    return value

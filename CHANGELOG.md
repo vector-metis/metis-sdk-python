@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.2
+
+- Runtime Config 的 protobuf `int64/uint64` 字段统一以字符串暴露，避免隐式整数转换和精度丢失。
+
 ## 0.4.0
 
 - 用 `Client.runtime_config()` 统一读取当前 service 的 settings、models、storage、tenant、features 和 revision。
