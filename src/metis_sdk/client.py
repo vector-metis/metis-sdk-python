@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import os
 import re
@@ -137,6 +139,46 @@ class RuntimeConfig:
     storage: Mapping[str, Any]
     tenant: Mapping[str, Any]
     features: Mapping[str, Any]
+
+
+@dataclass(frozen=True)
+class RuntimeSkillFile:
+    """Skill 文件的非敏感清单和摘要；原始 int64 size 保持为十进制字符串。"""
+
+    path: str
+    size: str
+    sha256: str
+    media_type: str
+
+
+@dataclass(frozen=True)
+class RuntimeCapability:
+    """当前 service 可见的 MCP/Skill 目录投影。"""
+
+    id: str
+    kind: str
+    key: str
+    name: str
+    description: str
+    source: str
+    version: str
+    digest: str
+    endpoint: str
+    path: str
+    transport: str
+    protocol_version: str
+    scope: str
+    restricted: bool
+    status: str
+    files: tuple[RuntimeSkillFile, ...]
+
+
+@dataclass(frozen=True)
+class RuntimeSkillFileContent:
+    """按需读取的 Skill 文件正文。"""
+
+    file: RuntimeSkillFile
+    body: bytes
 
 
 def context_from_headers(headers: Mapping[str, str]) -> RequestContext:
@@ -297,6 +339,73 @@ class Client:
         settings = {key: RuntimeSetting(type=str(item.get("type", "")), required=bool(item.get("required", False)), value=str(item.get("value", ""))) for key, item in config.get("settings", {}).items()}
         models = {key: _runtime_model(item) for key, item in config.get("models", {}).items()}
         return RuntimeConfig(schema_version=int(value.get("schemaVersion", 0) or 0), revision=_proto_i64_string(value.get("revision", ""), "revision"), updated_at=str(value.get("updatedAt", "")), application=value.get("application", {}), settings=settings, models=models, storage=config.get("storage", {}), tenant=config.get("tenant", {}), features=config.get("features", {}))
+
+    def list_capabilities(self, refresh: bool = False) -> list[RuntimeCapability]:
+        """列出当前 service 可见的 MCP 和 Skill。"""
+
+        query = urllib.parse.urlencode({"app_id": self.app_id})
+        value = self._get(f"/api/runtime/v1/capabilities?{query}", refresh)
+        return [_runtime_capability(item) for item in value.get("capabilities", [])]
+
+    def read_skill_file(self, skill_key: str, path: str, refresh: bool = False) -> RuntimeSkillFileContent:
+        """按当前启用版本的摘要清单读取 Skill 文件正文。"""
+
+        if not skill_key.strip() or not path.strip():
+            raise MetisError("INVALID_CONFIG", "skill key and path are required")
+        query = urllib.parse.urlencode({"app_id": self.app_id, "skill_key": skill_key, "path": path})
+        value = self._get(f"/api/runtime/v1/skill-files?{query}", refresh)
+        file = _runtime_skill_file(value.get("file", {}))
+        raw_body = value.get("body", "")
+        if not isinstance(raw_body, str):
+            raise MetisError("UPSTREAM_FAILURE", "runtime skill file body is invalid", 502)
+        try:
+            body = base64.b64decode(raw_body, validate=True)
+        except (ValueError, binascii.Error) as error:
+            raise MetisError("UPSTREAM_FAILURE", "runtime skill file body is invalid", 502) from error
+        return RuntimeSkillFileContent(file=file, body=body)
+
+    def call_platform_mcp_tool(self, name: str, arguments: Mapping[str, Any] | None = None) -> Any:
+        """调用平台 MCP 的 tools/call，返回工具 result 的 JSON 值。"""
+
+        name = name.strip()
+        if not name:
+            raise MetisError("INVALID_CONFIG", "platform MCP tool name is required")
+        payload = {
+            "jsonrpc": "2.0",
+            "id": "metis-sdk-1",
+            "method": "tools/call",
+            "params": {"name": name, "arguments": dict(arguments or {})},
+        }
+        request = urllib.request.Request(
+            self.platform_endpoint + "/mcp/v1/platform",
+            data=json.dumps(payload).encode("utf-8"),
+            method="POST",
+            headers={
+                "Authorization": "Bearer " + self.app_token,
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "MCP-Protocol-Version": "2026-07-28",
+                "Mcp-Method": "tools/call",
+                "Mcp-Name": name,
+            },
+        )
+        try:
+            with self.opener(request) as response:
+                value = json.load(response)
+        except urllib.error.HTTPError as error:
+            try:
+                value = json.load(error)
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                value = {}
+            raise MetisError(value.get("reason", "MCP_UPSTREAM_FAILURE"), value.get("message", "platform MCP request failed"), error.code) from error
+        except (json.JSONDecodeError, UnicodeDecodeError) as error:
+            raise MetisError("MCP_INVALID_RESPONSE", "platform MCP response is invalid", 502) from error
+        if value.get("error"):
+            error = value["error"]
+            raise MetisError("MCP_ERROR", str(error.get("message", "platform MCP tool failed")), 502)
+        if "result" not in value:
+            raise MetisError("MCP_INVALID_RESPONSE", "platform MCP result is missing", 502)
+        return value["result"]
 
     def _parse_model_slot(self, slot: str) -> ModelConfig | None:
         parts = slot.split(".")
@@ -495,6 +604,34 @@ def _runtime_model(value: Mapping[str, Any]) -> RuntimeModel:
         declared=bool(value.get("declared", False)), bound=bool(value.get("bound", False)), status=str(value.get("status", "")),
         icon_file_id=_proto_i64_string(value.get("iconFileId", ""), "iconFileId"), supports_audio=bool(value.get("supportsAudio", False)),
         supports_image_input=bool(value.get("supportsImageInput", False)), supports_multimodal=bool(value.get("supportsMultimodal", False)),
+    )
+
+
+def _runtime_skill_file(value: Mapping[str, Any]) -> RuntimeSkillFile:
+    """把 Runtime Skill 文件清单转换成稳定的 Python 类型。"""
+
+    return RuntimeSkillFile(
+        path=str(value.get("path", "")),
+        size=_proto_i64_string(value.get("size", ""), "size"),
+        sha256=str(value.get("sha256", "")),
+        media_type=str(value.get("mediaType", "")),
+    )
+
+
+def _runtime_capability(value: Mapping[str, Any]) -> RuntimeCapability:
+    """把 Runtime capability 的 camelCase 字段转换为 snake_case。"""
+
+    files = value.get("files", [])
+    if not isinstance(files, list):
+        files = []
+    return RuntimeCapability(
+        id=_proto_i64_string(value.get("id", ""), "id"), kind=str(value.get("kind", "")),
+        key=str(value.get("key", "")), name=str(value.get("name", "")), description=str(value.get("description", "")),
+        source=str(value.get("source", "")), version=str(value.get("version", "")), digest=str(value.get("digest", "")),
+        endpoint=str(value.get("endpoint", "")), path=str(value.get("path", "")), transport=str(value.get("transport", "")),
+        protocol_version=str(value.get("protocolVersion", "")), scope=str(value.get("scope", "")),
+        restricted=bool(value.get("restricted", False)), status=str(value.get("status", "")),
+        files=tuple(_runtime_skill_file(item) for item in files if isinstance(item, Mapping)),
     )
 
 

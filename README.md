@@ -49,6 +49,21 @@ request = model.new_request("POST", "/v1/embeddings", without_user_attribution()
 `resolved_version`、`package_sha256`、`direct`、`available`、`resolution_error`、`app_type` 和
 `web_base_path`；应用应在使用可选依赖前检查 `available`。
 
+应用可以通过 Runtime API 读取当前 service 可见的 MCP/Skill，并按需获取 Skill 文件：
+
+```python
+capabilities = client.list_capabilities()
+for capability in capabilities:
+    print(capability.kind, capability.key, capability.version)
+file = client.read_skill_file("my-app/guide", "SKILL.md")
+print(file.file.path, file.file.size, file.body)
+result = client.call_platform_mcp_tool("search", {"query": "guide"})
+```
+
+`call_platform_mcp_tool()` 返回平台 MCP 工具的 JSON `result`，平台负责统一认证、可见性和
+审计。`RuntimeCapability.id`、`RuntimeSkillFile.size` 等原始 protobuf `int64/uint64` 字段
+保持十进制字符串，SDK 不隐式转换为 Python 整数。
+
 ## 开发
 
 ```bash

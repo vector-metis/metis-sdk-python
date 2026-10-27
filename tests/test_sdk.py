@@ -108,6 +108,35 @@ def test_runtime_64_bit_values_remain_strings():
     assert config.models["llm.0"].icon_file_id == "640409671307362375"
 
 
+def test_runtime_capabilities_skill_files_and_platform_mcp():
+    def open_request(request):
+        parsed = __import__("urllib.parse", fromlist=["urlsplit"]).urlsplit(request.full_url)
+        query = __import__("urllib.parse", fromlist=["parse_qs"]).parse_qs(parsed.query)
+        assert request.get_header("Authorization") == "Bearer token"
+        if parsed.path == "/api/runtime/v1/capabilities":
+            assert query["app_id"] == ["caller-a7x2m"]
+            payload = {"capabilities": [{"id": "640409671307362374", "kind": "skill", "key": "app-a7x2m/guide", "name": "guide", "version": "1.2.3", "files": [{"path": "SKILL.md", "size": "9007199254740993", "sha256": "abc", "mediaType": "text/markdown"}]}]}
+        elif parsed.path == "/api/runtime/v1/skill-files":
+            assert query["skill_key"] == ["app-a7x2m/guide"]
+            assert query["path"] == ["SKILL.md"]
+            payload = {"file": {"path": "SKILL.md", "size": "9007199254740993", "sha256": "abc", "mediaType": "text/markdown"}, "body": "aGVsbG8="}
+        else:
+            assert parsed.path == "/mcp/v1/platform"
+            assert request.get_header("Mcp-method") == "tools/call"
+            assert request.get_header("Mcp-name") == "search"
+            payload = {"jsonrpc": "2.0", "id": "metis-sdk-1", "result": {"content": [{"type": "text", "text": "ok"}]}}
+        return Response(json.dumps(payload).encode())
+
+    client = Client("http://platform.test", "caller-a7x2m", "token", opener=open_request)
+    capabilities = client.list_capabilities()
+    assert capabilities[0].id == "640409671307362374"
+    assert capabilities[0].files[0].size == "9007199254740993"
+    content = client.read_skill_file("app-a7x2m/guide", "SKILL.md")
+    assert content.body == b"hello"
+    assert content.file.size == "9007199254740993"
+    assert client.call_platform_mcp_tool("search", {"query": "guide"})["content"][0]["text"] == "ok"
+
+
 def test_explicit_local_config_and_missing_config():
     client = Client("http://localhost:80", "local-app", "token", environment={})
     assert client.app_id == "local-app"

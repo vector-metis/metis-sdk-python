@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.3
+
+- 增加 `list_capabilities()` 和 `read_skill_file()`，读取当前 service 可见的 MCP/Skill。
+- 增加 `call_platform_mcp_tool()`，统一调用平台 MCP 的发现、描述、调用和 Skill 文件读取工具。
+- Runtime capability 的 ID、文件大小和其它原始 `int64/uint64` 字段继续按字符串处理。
+
 ## 0.4.2
 
 - Runtime Config 的 protobuf `int64/uint64` 字段统一以字符串暴露，避免隐式整数转换和精度丢失。
