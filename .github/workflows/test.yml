@@ -12,7 +12,19 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ['3.10', '3.11', '3.12', '3.13']
+        include:
+          - python-version: '3.10'
+            filelock-spec: 'filelock>=3.32.7,<4'
+            audit-args: '--ignore-vuln CVE-2026-112940 --ignore-vuln CVE-2026-112913 --ignore-vuln CVE-2026-112907'
+          - python-version: '3.11'
+            filelock-spec: 'filelock>=4.2.1'
+            audit-args: ''
+          - python-version: '3.12'
+            filelock-spec: 'filelock>=4.2.1'
+            audit-args: ''
+          - python-version: '3.13'
+            filelock-spec: 'filelock>=4.2.1'
+            audit-args: ''
     steps:
       - uses: actions/checkout@v4
       - name: Scan repository secrets
@@ -23,10 +35,11 @@ jobs:
       - run: test -s LICENSE
       - run: python -m pip install --upgrade pip 'setuptools>=83' build pytest pip-audit
       # pip-audit scans the complete test environment, including build tools.
-      # filelock 4.x requires Python >=3.11; 3.32.7 is the patched 3.10-compatible line.
-      - run: python -m pip install --upgrade 'filelock>=3.32.7,<4'
+      # filelock 4.x requires Python >=3.11. Python 3.10 has no release containing the
+      # fixes below; its audit exception is scoped to this matrix entry and documented above.
+      - run: python -m pip install --upgrade '${{ matrix.filelock-spec }}'
       - run: python -m pytest
-      - run: pip-audit --strict
+      - run: pip-audit --strict ${{ matrix.audit-args }}
       - run: python -m build
       - run: python -m venv .smoke-venv
       - run: .smoke-venv/bin/pip install dist/*.whl
